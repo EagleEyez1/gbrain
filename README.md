@@ -1,96 +1,232 @@
 # GBrain
 
-Personal knowledge brain backed by Postgres + pgvector. Hybrid search that actually works.
+Open source personal knowledge brain. Postgres + pgvector + hybrid search that actually works.
 
 ```bash
 gbrain query "who knows Jensen Huang?"
-# Returns ranked results with evidence from your compiled intelligence pages
 ```
 
-## Quickstart
+Returns ranked results with evidence chains from your compiled intelligence pages, cross-referenced across 7,000+ entity pages in under 50ms.
 
-```bash
-# Install
-npm install -g gbrain
+## Why this exists
 
-# Initialize with Supabase (guided wizard)
-gbrain init --supabase
+You have a brain full of knowledge about people, companies, deals, projects. It lives in markdown files, meeting notes, CRM exports, Obsidian vaults, Notion databases. It's scattered, unsearchable, and going stale.
 
-# Import your markdown wiki
-gbrain import /path/to/brain/
+Search is the bottleneck. Keyword search misses semantic matches. Vector search misses exact names. Neither understands that the person you met at dinner last week works at the company you're evaluating for a deal.
 
-# Search
-gbrain query "what does PG say about doing things that don't scale?"
-```
+GBrain fixes this with hybrid search that combines both approaches, plus a knowledge model that treats every page like an intelligence assessment: compiled truth on top (your current best understanding, rewritten when evidence changes), append-only timeline on the bottom (the evidence trail that never gets edited).
 
-## What is this
-
-GBrain turns a directory of markdown files into a searchable, AI-queryable knowledge base.
-
-Every page is structured as **compiled truth** (your current best understanding) and **timeline** (append-only evidence trail). AI agents maintain the brain through skills. MCP clients query it.
-
-Search uses hybrid Reciprocal Rank Fusion: pgvector HNSW cosine similarity + PostgreSQL tsvector full-text search + multi-query expansion via Claude Haiku + 4-layer dedup. Not "good enough." Actually good.
+AI agents maintain the brain. You ingest a meeting and the agent updates every person and company mentioned, creates cross-reference links, and appends timeline entries. MCP clients query it. The intelligence lives in fat markdown skills, not application code.
 
 ## Install
 
-Three ways to use gbrain:
+```bash
+npm install -g gbrain
+```
 
-| Path | For | Install |
-|------|-----|---------|
-| npm package | OpenClaw, library consumers | `bun add gbrain` |
-| CLI binary | Humans | `npm install -g gbrain` |
-| MCP server | Claude Code, Cursor | `gbrain serve` |
+Or use as a library in your own project:
+
+```bash
+bun add gbrain
+```
+
+Requires a Postgres database with pgvector. Supabase Pro ($25/mo) is the recommended zero-ops option.
+
+## Setup
+
+```bash
+# Guided wizard: auto-provisions Supabase or accepts a connection URL
+gbrain init --supabase
+
+# Or connect to any Postgres with pgvector
+gbrain init --url postgresql://user:pass@host:5432/dbname
+```
+
+The init wizard:
+1. Checks for Supabase CLI, offers auto-provisioning
+2. Falls back to manual connection URL if CLI isn't available
+3. Runs the full schema migration (tables, indexes, triggers, extensions)
+4. Imports a kindling corpus (10 PG essays) as demo data
+5. Verifies the connection and prints your first query to try
+
+Config is saved to `~/.gbrain/config.json` with 0600 permissions.
+
+## First import
+
+```bash
+# Import your markdown wiki (auto-chunks and auto-embeds)
+gbrain import /path/to/brain/
+
+# Skip embedding if you want to import fast and embed later
+gbrain import /path/to/brain/ --no-embed
+
+# Backfill embeddings for pages that don't have them
+gbrain embed --stale
+```
+
+Import is idempotent. Re-running it skips unchanged files (compared by SHA-256 content hash). Progress bar shows status. ~30s for text import of 7,000 files, ~10-15 min for embedding.
+
+## The knowledge model
+
+Every page in the brain follows the compiled truth + timeline pattern:
+
+```markdown
+---
+type: person
+title: Pedro Franceschi
+tags: [founder, fintech]
+---
+
+Co-founder and CEO of Brex. Previously built a payments company in Brazil
+at age 16. Strong technical founder with deep fintech expertise.
+
+---
+
+- 2024-03-20: Brex announced Series D at $12B valuation
+- 2024-01-15: Met at dinner, discussed expansion into expense management
+- 2023-09-01: Brex hit $1B ARR
+```
+
+Above the `---` separator: **compiled truth**. Your current best understanding. Gets rewritten when new evidence changes the picture. Below: **timeline**. Append-only evidence trail. Never edited, only added to.
+
+This is the Karpathy-style intelligence assessment model. The compiled truth is the answer. The timeline is the proof.
+
+## How search works
+
+```
+Query: "who knows Jensen Huang?"
+         |
+    Multi-query expansion (Claude Haiku)
+    "Jensen Huang connections", "people who know Jensen"
+         |
+    +----+----+
+    |         |
+  Vector    Keyword
+  (HNSW     (tsvector +
+  cosine)    ts_rank)
+    |         |
+    +----+----+
+         |
+    RRF Fusion: score = sum(1/(60 + rank))
+         |
+    4-Layer Dedup
+    1. Best chunk per page
+    2. Cosine similarity > 0.85
+    3. Type diversity (60% cap)
+    4. Per-page chunk cap
+         |
+    Stale alerts (compiled truth older than latest timeline)
+         |
+    Results
+```
+
+Keyword search alone misses "Jensen Huang" when the page says "CEO of NVIDIA." Vector search alone misses exact name matches when the embedding is diluted by surrounding text. RRF fusion gets both right. Multi-query expansion catches phrasings you didn't think of.
+
+## Database schema
+
+9 tables in Postgres + pgvector:
+
+```
+pages                    The core content table
+  slug (UNIQUE)          e.g. "people/pedro-franceschi"
+  type                   person, company, deal, yc, civic, project, concept, source, media
+  title, compiled_truth, timeline
+  frontmatter (JSONB)    Arbitrary metadata
+  search_vector          Trigger-based tsvector (title + compiled_truth + timeline + timeline_entries)
+  content_hash           SHA-256 for import idempotency
+
+content_chunks           Chunked content with embeddings
+  page_id (FK)           Links to pages
+  chunk_text             The chunk content
+  chunk_source           'compiled_truth' or 'timeline'
+  embedding (vector)     1536-dim from text-embedding-3-large
+  HNSW index             Cosine similarity search
+
+links                    Cross-references between pages
+  from_page_id, to_page_id
+  link_type              knows, invested_in, works_at, founded, etc.
+
+tags                     page_id + tag (many-to-many)
+
+timeline_entries         Structured timeline events
+  page_id, date, source, summary, detail (markdown)
+
+page_versions            Snapshot history for compiled_truth
+  compiled_truth, frontmatter, snapshot_at
+
+raw_data                 Sidecar JSON from external APIs
+  page_id, source, data (JSONB)
+
+ingest_log               Audit trail of import/ingest operations
+
+config                   Brain-level settings (embedding model, chunk strategy)
+```
+
+Indexes: B-tree on slug/type, GIN on frontmatter/search_vector, HNSW on embeddings, pg_trgm on title for fuzzy slug resolution.
+
+## Chunking
+
+Three strategies, dispatched by content type:
+
+**Recursive** (timeline, bulk import): 5-level delimiter hierarchy (paragraphs, lines, sentences, clauses, words). 300-word chunks with 50-word sentence-aware overlap. Fast, predictable, lossless.
+
+**Semantic** (compiled truth): Embeds each sentence, computes adjacent cosine similarities, applies Savitzky-Golay smoothing to find topic boundaries. Falls back to recursive on failure. Best quality for intelligence assessments.
+
+**LLM-guided** (high-value content, on request): Pre-splits into 128-word candidates, asks Claude Haiku to identify topic shifts in sliding windows. 3 retries per window. Most expensive, best results.
 
 ## Commands
 
 ```
-gbrain init [--supabase|--url <conn>]   Setup brain
-gbrain get <slug>                        Read a page
-gbrain put <slug> [< file.md]           Write a page
-gbrain search <query>                    Keyword search
-gbrain query <question>                  Hybrid search (the good one)
-gbrain import <dir> [--no-embed]        Import markdown directory
-gbrain export [--dir ./out/]            Export to markdown
-gbrain embed [<slug>|--all|--stale]     Generate embeddings
-gbrain link <from> <to> [--type T]     Create typed link
-gbrain graph <slug> [--depth N]         Traverse link graph
-gbrain health                            Brain health dashboard
-gbrain stats                             Statistics
-gbrain serve                             MCP server (stdio)
-gbrain --tools-json                      Tool discovery
+SETUP
+  gbrain init [--supabase|--url <conn>]     Create brain (guided wizard)
+  gbrain upgrade                            Self-update
+
+PAGES
+  gbrain get <slug>                         Read a page (supports fuzzy slug matching)
+  gbrain put <slug> [< file.md]             Write/update a page (auto-versions)
+  gbrain delete <slug>                      Delete a page
+  gbrain list [--type T] [--tag T] [-n N]   List pages with filters
+
+SEARCH
+  gbrain search <query>                     Keyword search (tsvector)
+  gbrain query <question>                   Hybrid search (vector + keyword + RRF + expansion)
+
+IMPORT/EXPORT
+  gbrain import <dir> [--no-embed]          Import markdown directory (idempotent)
+  gbrain export [--dir ./out/]              Export to markdown (round-trip)
+
+EMBEDDINGS
+  gbrain embed [<slug>|--all|--stale]       Generate/refresh embeddings
+
+LINKS + GRAPH
+  gbrain link <from> <to> [--type T]        Create typed link
+  gbrain unlink <from> <to>                 Remove link
+  gbrain backlinks <slug>                   Incoming links
+  gbrain graph <slug> [--depth N]           Traverse link graph (recursive CTE, default depth 5)
+
+TAGS
+  gbrain tags <slug>                        List tags
+  gbrain tag <slug> <tag>                   Add tag
+  gbrain untag <slug> <tag>                 Remove tag
+
+TIMELINE
+  gbrain timeline [<slug>]                  View timeline entries
+  gbrain timeline-add <slug> <date> <text>  Add timeline entry
+
+ADMIN
+  gbrain stats                              Brain statistics
+  gbrain health                             Health dashboard (embed coverage, stale, orphans)
+  gbrain history <slug>                     Page version history
+  gbrain revert <slug> <version-id>         Revert to previous version
+  gbrain config [get|set] <key> [value]     Brain config
+  gbrain serve                              MCP server (stdio)
+  gbrain call <tool> '<json>'               Raw tool invocation
+  gbrain --tools-json                       Tool discovery (JSON)
 ```
-
-Full list: `gbrain --help`
-
-## Architecture
-
-```
-CLI / MCP Server (thin wrappers)
-        |
-   BrainEngine interface (pluggable)
-        |
-   PostgresEngine (ships in v0)
-        |
-   Supabase (Postgres + pgvector)
-```
-
-- **Pluggable engine interface.** Postgres ships. SQLite is designed and documented for community PRs. See `docs/ENGINES.md`.
-- **3-tier chunking.** Recursive (delimiter-aware), semantic (Savitzky-Golay boundary detection), LLM-guided (Claude Haiku topic shifts).
-- **Hybrid search.** Vector + keyword merged via RRF. Multi-query expansion. 4-layer dedup.
-- **Fat skills.** Markdown files that AI agents read and follow. No skill logic in the binary.
-
-## Skills
-
-| Skill | What it does |
-|-------|-------------|
-| ingest | Ingest meetings, docs, articles. Update compiled truth + timeline. |
-| query | 3-layer search + synthesis with citations. |
-| maintain | Health checks: stale info, orphans, dead links, tag consistency. |
-| enrich | Enrich pages from external APIs. |
-| briefing | Daily briefing: meetings, deals, open threads. |
-| migrate | Universal migration from Obsidian, Notion, Logseq, markdown, CSV, JSON, Roam. |
 
 ## Using as a library
+
+GBrain is library-first. The CLI and MCP server are thin wrappers over the engine.
 
 ```typescript
 import { PostgresEngine } from 'gbrain';
@@ -99,18 +235,33 @@ const engine = new PostgresEngine();
 await engine.connect({ database_url: process.env.DATABASE_URL });
 await engine.initSchema();
 
-const page = await engine.putPage('people/pedro', {
+// Write a page
+await engine.putPage('people/pedro', {
   type: 'person',
   title: 'Pedro Franceschi',
-  compiled_truth: 'Co-founder of Brex...',
+  compiled_truth: 'Co-founder and CEO of Brex...',
+  timeline: '- 2024-01-15: Met at dinner...',
 });
 
+// Hybrid search
 const results = await engine.searchKeyword('fintech founders');
+
+// Typed links
+await engine.addLink('people/pedro', 'companies/brex', '', 'founded');
+
+// Graph traversal
+const graph = await engine.traverseGraph('people/pedro', 3);
+
+// Health check
+const health = await engine.getHealth();
+// { page_count: 7471, embed_coverage: 0.98, stale_pages: 12, orphan_pages: 34 }
 ```
 
-## MCP Server
+The `BrainEngine` interface is pluggable. See `docs/ENGINES.md` for how to add backends.
 
-Add to your MCP config:
+## MCP server
+
+Add to your Claude Code or Cursor MCP config:
 
 ```json
 {
@@ -123,13 +274,76 @@ Add to your MCP config:
 }
 ```
 
-20 tools exposed: get/put/delete/list pages, search, query, tags, links, timeline, stats, health, versions.
+20 tools: get_page, put_page, delete_page, list_pages, search, query, add_tag, remove_tag, get_tags, add_link, remove_link, get_links, get_backlinks, traverse_graph, add_timeline_entry, get_timeline, get_stats, get_health, get_versions, revert_version.
+
+Every tool mirrors a CLI command. Drift tests verify identical behavior.
+
+## Skills
+
+Fat markdown files that tell AI agents HOW to use gbrain. No skill logic in the binary.
+
+| Skill | What it does |
+|-------|-------------|
+| **ingest** | Ingest meetings, docs, articles. Updates compiled truth (rewrite, not append), appends timeline, creates cross-reference links across all mentioned entities. |
+| **query** | 3-layer search (keyword + vector + structured) with synthesis and citations. Says "the brain doesn't have info on X" rather than hallucinating. |
+| **maintain** | Periodic health: find contradictions, stale compiled truth, orphan pages, dead links, tag inconsistency, missing embeddings, overdue threads. |
+| **enrich** | Enrich person/company pages from external APIs (Crustdata, Happenstance, Exa). Raw data stored separately, distilled highlights go to compiled truth. |
+| **briefing** | Daily briefing: today's meetings with participant context, active deals with deadlines, time-sensitive threads, recent changes, people in play. |
+| **migrate** | Universal migration from Obsidian (wikilinks to gbrain links), Notion (stripped UUIDs), Logseq (block refs), plain markdown, CSV, JSON, Roam. |
+
+## Architecture
+
+```
+CLI / MCP Server
+     (thin wrappers, identical operations)
+              |
+      BrainEngine interface
+       (pluggable backend)
+              |
+     +--------+--------+
+     |                  |
+PostgresEngine     SQLiteEngine
+  (ships v0)       (designed, community PRs welcome)
+     |
+Supabase Pro ($25/mo)
+  Postgres + pgvector + pg_trgm
+  connection pooling via Supavisor
+```
+
+Embedding, chunking, and search fusion are engine-agnostic. Only raw keyword search (`searchKeyword`) and raw vector search (`searchVector`) are engine-specific. RRF fusion, multi-query expansion, and 4-layer dedup run above the engine on `SearchResult[]` arrays.
+
+## Storage estimates
+
+For a brain with ~7,500 pages:
+
+| Component | Size |
+|-----------|------|
+| Page text (compiled_truth + timeline) | ~150MB |
+| JSONB frontmatter + indexes | ~70MB |
+| Content chunks (~22K, text) | ~80MB |
+| Embeddings (22K x 1536 floats) | ~134MB |
+| HNSW index overhead | ~270MB |
+| Links, tags, timeline, versions | ~50MB |
+| **Total** | **~750MB** |
+
+Supabase free tier (500MB) won't fit a large brain. Supabase Pro ($25/mo, 8GB) is the starting point.
+
+Initial embedding cost: ~$4-5 for 7,500 pages via OpenAI text-embedding-3-large.
 
 ## Docs
 
-- [GBRAIN_V0.md](docs/GBRAIN_V0.md) - Full product spec and architecture decisions
-- [ENGINES.md](docs/ENGINES.md) - Pluggable engine architecture
-- [SQLITE_ENGINE.md](docs/SQLITE_ENGINE.md) - SQLite engine implementation plan
+- [GBRAIN_V0.md](docs/GBRAIN_V0.md) -- Full product spec, all architecture decisions, every option considered
+- [ENGINES.md](docs/ENGINES.md) -- Pluggable engine interface, capability matrix, how to add backends
+- [SQLITE_ENGINE.md](docs/SQLITE_ENGINE.md) -- Complete SQLite engine plan with schema, FTS5, vector search options
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Welcome PRs for:
+
+- SQLite engine implementation
+- Docker Compose for self-hosted Postgres
+- Additional migration sources
+- New enrichment API integrations
 
 ## License
 
