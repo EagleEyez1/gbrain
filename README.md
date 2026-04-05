@@ -20,19 +20,41 @@ AI agents maintain the brain. You ingest a meeting and the agent updates every p
 
 ## Install
 
+### Prerequisites
+
+GBrain needs three things to run:
+
+| Dependency | What it's for | How to get it |
+|------------|--------------|---------------|
+| **Supabase account** | Postgres + pgvector database | [supabase.com](https://supabase.com) (Pro tier, $25/mo for 8GB) |
+| **OpenAI API key** | Embeddings (text-embedding-3-large) | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
+| **Anthropic API key** | Multi-query expansion + LLM chunking (Haiku) | [console.anthropic.com](https://console.anthropic.com) |
+
+Set the API keys as environment variables:
+
+```bash
+export OPENAI_API_KEY=sk-...
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+The Supabase connection URL is configured during `gbrain init`. The OpenAI and Anthropic SDKs read their keys from the environment automatically.
+
+Without an OpenAI key, search still works (keyword only, no vector search). Without an Anthropic key, search still works (no multi-query expansion, no LLM chunking).
+
 ### With OpenClaw (recommended)
 
-If you're running OpenClaw, just tell it to set up your brain:
+If you're running OpenClaw, tell it to set up your brain. Make sure your API keys are set in the environment first.
 
 ```
-You: "Install gbrain and set up my knowledge brain"
+You: "Install gbrain and set up my knowledge brain.
+      I need you to:
+      1. Run: bun add gbrain
+      2. Run: gbrain init --supabase (follow the wizard to connect my Supabase database)
+      3. Run: gbrain import data/kindling/ (import the demo corpus)
+      4. Read the skill files in skills/ so you know how to use the brain"
 ```
 
-OpenClaw will:
-1. Install gbrain as a dependency (`bun add gbrain`)
-2. Run the guided Supabase setup wizard
-3. Import a demo corpus so you can try a query immediately
-4. Register all 6 brain skills (ingest, query, maintain, enrich, briefing, migrate)
+OpenClaw will install the package, walk through the Supabase connection wizard, import demo data, and learn the 6 brain skills (ingest, query, maintain, enrich, briefing, migrate).
 
 After setup, you talk to your brain through OpenClaw:
 
@@ -44,7 +66,7 @@ You: "Give me a briefing for my meetings tomorrow"
 You: "Import my Obsidian vault into the brain"
 ```
 
-OpenClaw reads the skill files, figures out which gbrain commands to run, and does the work. You never touch the CLI directly unless you want to.
+OpenClaw reads the skill files in `skills/`, figures out which gbrain commands to run, and does the work. You never touch the CLI directly unless you want to.
 
 ### With ClawHub
 
