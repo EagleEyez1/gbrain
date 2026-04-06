@@ -74,6 +74,11 @@ async function main() {
         await runImport(engine, args.slice(1));
         break;
       }
+      case 'sync': {
+        const { runSync } = await import('./commands/sync.ts');
+        await runSync(engine, args.slice(1));
+        break;
+      }
       case 'export': {
         const { runExport } = await import('./commands/export.ts');
         await runExport(engine, args.slice(1));
@@ -213,6 +218,7 @@ SEARCH
 
 IMPORT/EXPORT
   import <dir> [--no-embed]          Import markdown directory
+  sync [--repo <path>] [flags]       Git-to-brain incremental sync
   export [--dir ./out/]              Export to markdown
 
 EMBEDDINGS
