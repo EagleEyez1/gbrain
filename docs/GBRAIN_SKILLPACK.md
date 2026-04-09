@@ -1,4 +1,4 @@
-<!-- skillpack-version: 0.4.0 -->
+<!-- skillpack-version: 0.4.1 -->
 <!-- source: https://raw.githubusercontent.com/garrytan/gbrain/master/docs/GBRAIN_SKILLPACK.md -->
 # GBrain Skillpack: Reference Architecture for AI Agents
 
@@ -1192,7 +1192,7 @@ installing gbrain, you can still stay current. Both this file and
 GBRAIN_RECOMMENDED_SCHEMA.md have version markers in their first lines:
 
 ```
-<!-- skillpack-version: 0.4.0 -->
+<!-- skillpack-version: 0.4.1 -->
 <!-- source: https://raw.githubusercontent.com/garrytan/gbrain/master/docs/GBRAIN_SKILLPACK.md -->
 ```
 

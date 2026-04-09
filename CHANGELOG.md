@@ -2,6 +2,28 @@
 
 All notable changes to GBrain will be documented in this file.
 
+## [0.4.1] - 2026-04-09
+
+### Added
+
+- `gbrain check-update` command with `--json` output. Checks GitHub Releases for new versions, compares semver (minor+ only, skips patches), fetches and parses changelog diffs. Fail-silent on network errors.
+- SKILLPACK Section 17: Auto-Update Notifications. Full agent playbook for the update lifecycle: check, notify, consent, upgrade, skills refresh, schema sync, report. Never auto-upgrades without user permission.
+- Standalone SKILLPACK self-update for users who load the skillpack directly without the gbrain CLI. Version markers in SKILLPACK and RECOMMENDED_SCHEMA headers, with raw GitHub URL fetching.
+- Step 7 in the OpenClaw install paste: daily update checks, default-on. User opts into being notified about updates, not into automatic installs.
+- Setup skill Phase G: conditional auto-update offer for manual install users.
+- Schema state tracking via `~/.gbrain/update-state.json`. Tracks which recommended schema directories the user adopted, declined, or added custom. Future upgrades suggest new additions without re-suggesting declined items.
+- `skills/migrations/` directory convention for version-specific post-upgrade agent directives.
+- 20 unit tests and 5 E2E tests for the check-update command, covering version comparison, changelog extraction, CLI wiring, and real GitHub API interaction.
+- E2E test DB lifecycle documentation in CLAUDE.md: spin up, run tests, tear down. No orphaned containers.
+
+### Changed
+
+- `detectInstallMethod()` exported from `upgrade.ts` for reuse by `check-update`.
+
+### Fixed
+
+- Semver comparison in changelog extraction was missing major-version guard, causing incorrect changelog entries to appear when crossing major version boundaries.
+
 ## [0.4.0] - 2026-04-09
 
 ### Added
