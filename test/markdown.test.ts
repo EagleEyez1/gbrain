@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { parseMarkdown, serializeMarkdown, splitBody } from '../src/core/markdown.ts';
+import { extractInternalMarkdownLinks, parseMarkdown, resolveInternalMarkdownLink, serializeMarkdown, splitBody } from '../src/core/markdown.ts';
 
 describe('Markdown Parser', () => {
   test('parses frontmatter + compiled_truth + timeline', () => {
@@ -110,7 +110,15 @@ describe('splitBody', () => {
     expect(compiled_truth).toContain('Content here');
     expect(timeline.trim()).toBe('');
   });
-});
+
+  test('falls back to heading-based timeline sections', () => {
+    const body = '# Eric Oberhofer\n\n## Compiled Truth\n\nCurrent state.\n\n## Timeline\n\n### 2026-04-13 — Created\nPage created.';
+    const { compiled_truth, timeline } = splitBody(body);
+    expect(compiled_truth).toContain('## Compiled Truth');
+    expect(timeline).toContain('2026-04-13');
+    expect(timeline).not.toContain('## Timeline');
+  });
+ });
 
 describe('serializeMarkdown', () => {
   test('round-trips through parse and serialize', () => {
@@ -198,5 +206,24 @@ Some content.`;
     expect(parseMarkdown('', 'people/someone.md').type).toBe('person');
     expect(parseMarkdown('', 'concepts/thing.md').type).toBe('concept');
     expect(parseMarkdown('', 'companies/acme.md').type).toBe('company');
+  });
+});
+
+describe('internal markdown links', () => {
+  test('resolves relative links to page slugs', () => {
+    expect(resolveInternalMarkdownLink('people/eric-oberhofer', '../companies/exohelix.md')).toBe('companies/exohelix');
+    expect(resolveInternalMarkdownLink('people/eric-oberhofer', 'joanna-oberhofer.md')).toBe('people/joanna-oberhofer');
+  });
+
+  test('ignores external and non-markdown links', () => {
+    expect(resolveInternalMarkdownLink('people/eric-oberhofer', 'https://example.com')).toBeNull();
+    expect(resolveInternalMarkdownLink('people/eric-oberhofer', '#timeline')).toBeNull();
+    expect(resolveInternalMarkdownLink('people/eric-oberhofer', '../files/photo.png')).toBeNull();
+  });
+
+  test('extracts unique internal markdown links from content', () => {
+    const content = '[ExoHelix](../companies/exohelix.md) and [Joanna](joanna-oberhofer.md) and [ExoHelix](../companies/exohelix.md)';
+    const links = extractInternalMarkdownLinks(content, 'people/eric-oberhofer');
+    expect(links.map(link => link.target_slug)).toEqual(['companies/exohelix', 'people/joanna-oberhofer']);
   });
 });

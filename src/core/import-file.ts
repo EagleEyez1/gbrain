@@ -1,7 +1,7 @@
 import { readFileSync, statSync, lstatSync } from 'fs';
 import { createHash } from 'crypto';
 import type { BrainEngine } from './engine.ts';
-import { parseMarkdown } from './markdown.ts';
+import { extractInternalMarkdownLinks, parseMarkdown } from './markdown.ts';
 import { chunkText } from './chunkers/recursive.ts';
 import { embedBatch } from './embedding.ts';
 import { slugifyPath } from './sync.ts';
@@ -15,6 +15,29 @@ export interface ImportResult {
 }
 
 const MAX_FILE_SIZE = 5_000_000; // 5MB
+
+async function reconcilePageLinks(engine: BrainEngine, slug: string, desiredTargets: string[]): Promise<void> {
+  const desired = new Set(desiredTargets.filter(target => target && target !== slug));
+  const existingLinks = await engine.getLinks(slug);
+  const existing = new Set(existingLinks.map(link => link.to_slug));
+
+  for (const target of existing) {
+    if (!desired.has(target)) {
+      await engine.removeLink(slug, target);
+    }
+  }
+
+  for (const target of desired) {
+    if (!existing.has(target)) {
+      try {
+        await engine.addLink(slug, target);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`Skipping unresolved link ${slug} -> ${target}: ${message}`);
+      }
+    }
+  }
+}
 
 /**
  * Import content from a string. Core pipeline:
@@ -48,6 +71,7 @@ export async function importFromContent(
   }
 
   const parsed = parseMarkdown(content, slug + '.md');
+  const desiredLinkTargets = extractInternalMarkdownLinks(content, slug).map(link => link.target_slug);
 
   // Hash includes ALL fields for idempotency (not just compiled_truth + timeline)
   const hash = createHash('sha256')
@@ -63,6 +87,9 @@ export async function importFromContent(
 
   const existing = await engine.getPage(slug);
   if (existing?.content_hash === hash) {
+    await engine.transaction(async (tx) => {
+      await reconcilePageLinks(tx, slug, desiredLinkTargets);
+    });
     return { slug, status: 'skipped', chunks: 0 };
   }
 
@@ -114,6 +141,8 @@ export async function importFromContent(
     for (const tag of parsed.tags) {
       await tx.addTag(slug, tag);
     }
+
+    await reconcilePageLinks(tx, slug, desiredLinkTargets);
 
     if (chunks.length > 0) {
       await tx.upsertChunks(slug, chunks);

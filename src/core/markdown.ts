@@ -1,3 +1,4 @@
+import { posix as pathPosix } from 'path';
 import matter from 'gray-matter';
 import type { PageType } from './types.ts';
 import { slugifyPath } from './sync.ts';
@@ -10,6 +11,12 @@ export interface ParsedMarkdown {
   type: PageType;
   title: string;
   tags: string[];
+}
+
+export interface InternalMarkdownLink {
+  text: string;
+  href: string;
+  target_slug: string;
 }
 
 /**
@@ -84,11 +91,22 @@ export function splitBody(body: string): { compiled_truth: string; timeline: str
   }
 
   if (splitIndex === -1) {
-    return { compiled_truth: body, timeline: '' };
+    return splitBodyByHeading(body);
   }
 
   const compiled_truth = lines.slice(0, splitIndex).join('\n');
   const timeline = lines.slice(splitIndex + 1).join('\n');
+  return { compiled_truth, timeline };
+}
+
+function splitBodyByHeading(body: string): { compiled_truth: string; timeline: string } {
+  const timelineMatch = body.match(/^##\s+Timeline\s*$/m);
+  if (!timelineMatch || timelineMatch.index === undefined) {
+    return { compiled_truth: body, timeline: '' };
+  }
+
+  const compiled_truth = body.slice(0, timelineMatch.index).trimEnd();
+  const timeline = body.slice(timelineMatch.index + timelineMatch[0].length).trimStart();
   return { compiled_truth, timeline };
 }
 
@@ -120,6 +138,48 @@ export function serializeMarkdown(
   }
 
   return yamlContent + '\n\n' + body + '\n';
+}
+
+/**
+ * Extract internal markdown links and resolve them to page slugs.
+ * External URLs, anchors, mailto links, and non-markdown assets are ignored.
+ */
+export function extractInternalMarkdownLinks(content: string, sourceSlug: string): InternalMarkdownLink[] {
+  const linkPattern = /\[([^\]]+)\]\(([^)]+)\)/g;
+  const links: InternalMarkdownLink[] = [];
+  const seen = new Set<string>();
+
+  let match: RegExpExecArray | null;
+  while ((match = linkPattern.exec(content)) !== null) {
+    const text = match[1]?.trim() || '';
+    const href = match[2]?.trim() || '';
+    const targetSlug = resolveInternalMarkdownLink(sourceSlug, href);
+    if (!targetSlug) continue;
+
+    const dedupeKey = `${targetSlug}|${href}|${text}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    links.push({ text, href, target_slug: targetSlug });
+  }
+
+  return links;
+}
+
+export function resolveInternalMarkdownLink(sourceSlug: string, href: string): string | null {
+  const trimmed = href.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return null;
+  if (trimmed.startsWith('mailto:') || trimmed.startsWith('#')) return null;
+
+  const withoutFragment = trimmed.split('#')[0] || '';
+  const withoutQuery = withoutFragment.split('?')[0] || '';
+  if (!withoutQuery.toLowerCase().endsWith('.md') && !withoutQuery.toLowerCase().endsWith('.mdx')) return null;
+
+  const sourcePath = `${sourceSlug}.md`;
+  const resolvedPath = pathPosix.normalize(pathPosix.join(pathPosix.dirname(sourcePath), withoutQuery));
+  if (resolvedPath.startsWith('..')) return null;
+
+  return slugifyPath(resolvedPath);
 }
 
 function inferType(filePath?: string): PageType {

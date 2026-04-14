@@ -20,6 +20,7 @@ function mockEngine(overrides: Partial<Record<string, any>> = {}): BrainEngine {
       if (prop === '_calls') return calls;
       if (prop === 'getTags') return overrides.getTags || (() => Promise.resolve([]));
       if (prop === 'getPage') return overrides.getPage || (() => Promise.resolve(null));
+      if (prop === 'getLinks') return overrides.getLinks || (() => Promise.resolve([]));
       // transaction: just call the fn with the same engine (no real DB transaction in tests)
       if (prop === 'transaction') return async (fn: (tx: BrainEngine) => Promise<any>) => fn(engine);
       return track(prop);
@@ -241,6 +242,75 @@ Content here.
     expect(removeCalls.length).toBe(1);
     expect(removeCalls[0].args[1]).toBe('old-tag');
     expect(addCalls.length).toBe(2);
+  });
+
+  test('reconciles outgoing links on import', async () => {
+    const filePath = join(TMP, 'linked.md');
+    writeFileSync(filePath, `---
+type: person
+title: Linked
+---
+
+Works at [ExoHelix](../companies/exohelix.md) with [Joanna](joanna-oberhofer.md).
+`);
+
+    const engine = mockEngine({
+      getLinks: () => Promise.resolve([{ from_slug: 'people/linked', to_slug: 'people/old-link', link_type: '', context: '' }]),
+    });
+
+    await importFile(engine, filePath, 'people/linked.md', { noEmbed: true });
+
+    const calls = (engine as any)._calls;
+    const addCalls = calls.filter((c: any) => c.method === 'addLink');
+    const removeCalls = calls.filter((c: any) => c.method === 'removeLink');
+
+    expect(removeCalls).toHaveLength(1);
+    expect(removeCalls[0].args).toEqual(['people/linked', 'people/old-link']);
+    expect(addCalls.map((c: any) => c.args)).toEqual([
+      ['people/linked', 'companies/exohelix'],
+      ['people/linked', 'people/joanna-oberhofer'],
+    ]);
+  });
+
+  test('reconciles outgoing links even when content hash is unchanged', async () => {
+    const filePath = join(TMP, 'unchanged-links.md');
+    const content = `---
+type: person
+title: Unchanged Links
+---
+
+Works at [ExoHelix](../companies/exohelix.md).
+`;
+    writeFileSync(filePath, content);
+
+    const { createHash } = await import('crypto');
+    const { parseMarkdown } = await import('../src/core/markdown.ts');
+    const parsed = parseMarkdown(content, 'people/unchanged-links.md');
+    const hash = createHash('sha256')
+      .update(JSON.stringify({
+        title: parsed.title,
+        type: parsed.type,
+        compiled_truth: parsed.compiled_truth,
+        timeline: parsed.timeline,
+        frontmatter: parsed.frontmatter,
+        tags: parsed.tags.sort(),
+      }))
+      .digest('hex');
+
+    const engine = mockEngine({
+      getPage: () => Promise.resolve({ content_hash: hash }),
+      getLinks: () => Promise.resolve([]),
+    });
+
+    const result = await importFile(engine, filePath, 'people/unchanged-links.md', { noEmbed: true });
+    expect(result.status).toBe('skipped');
+
+    const calls = (engine as any)._calls;
+    expect(calls.find((c: any) => c.method === 'putPage')).toBeUndefined();
+    const addCalls = calls.filter((c: any) => c.method === 'addLink');
+    expect(addCalls.map((c: any) => c.args)).toEqual([
+      ['people/unchanged-links', 'companies/exohelix'],
+    ]);
   });
 
   test('chunks compiled_truth and timeline separately', async () => {
