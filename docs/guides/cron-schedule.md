@@ -23,8 +23,8 @@ fixed. You wake up and the brain is smarter than when you went to sleep.
 | 3x/day (weekdays) | Meeting sync | Full ingestion + attendee propagation | [meeting-sync](../../recipes/meeting-sync.md) |
 | Weekly | Calendar sync | Daily files + attendee enrichment | [calendar-to-brain](../../recipes/calendar-to-brain.md) |
 | Daily AM | Morning briefing | Search calendar attendees, deal status, active threads | [briefing skill](../../skills/briefing/SKILL.md) |
-| Weekly | Brain maintenance | `gbrain doctor`, embed stale, orphan detection | [maintain skill](../../skills/maintain/SKILL.md) |
-| Nightly | Dream cycle | Entity sweep, enrich thin spots, fix citations | See below |
+| Weekly | Brain maintenance | `gbrain doctor`, embed stale, orphan detection, relink DB graph from markdown links | [maintain skill](../../skills/maintain/SKILL.md) |
+| Nightly | Dream cycle | Entity sweep, enrich thin spots, fix citations, add/fix cross-links | See below |
 
 ## Implementation: Setting Up Cron Jobs
 
@@ -42,7 +42,7 @@ fixed. You wake up and the brain is smarter than when you went to sleep.
 0 10 * * 0 cd /path/to/calendar-sync && node calendar-sync.mjs --start $(date -v-7d +%Y-%m-%d) --end $(date +%Y-%m-%d)
 
 # Brain health — weekly Mondays at 6 AM
-0 6 * * 1 gbrain doctor --json >> /tmp/gbrain-health.log 2>&1 && gbrain embed --stale
+0 6 * * 1 gbrain doctor --json >> /tmp/gbrain-health.log 2>&1 && gbrain embed --stale && gbrain relink --dir /path/to/brain
 
 # Dream cycle — nightly at 2 AM
 0 2 * * * /path/to/dream-cycle.sh
@@ -121,6 +121,7 @@ dream_cycle():
 
   // Phase 4: Sync
   gbrain sync --no-pull --no-embed
+  gbrain relink --dir /path/to/brain
   gbrain embed --stale
 ```
 
@@ -182,9 +183,9 @@ echo "Dream cycle complete at $(date)"
 
 1. **Quiet hours:** Set quiet hours to current hour. Run a notification cron.
    Verify output went to `/tmp/cron-held/`, not to messaging.
-2. **Dream cycle:** Run the dream cycle manually. Check that thin entity pages
-   got enriched and broken citations were fixed.
-3. **Email collector cron:** Wait 30 minutes. Check `data/digests/` for new digest.
+2. Dream cycle: Run the dream cycle manually. Check that thin entity pages
+   got enriched, broken citations were fixed, and the DB link graph was rebuilt.
+3. Email collector cron: Wait 30 minutes. Check `data/digests/` for new digest.
 4. **Morning briefing:** Check that held messages appear in the briefing.
 5. **Health check:** Run `gbrain doctor --json`. All checks should pass.
 

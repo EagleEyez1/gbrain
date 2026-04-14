@@ -18,7 +18,7 @@ for (const op of operations) {
 }
 
 // CLI-only commands that bypass the operation layer
-const CLI_ONLY = new Set(['init', 'upgrade', 'post-upgrade', 'check-update', 'integrations', 'publish', 'check-backlinks', 'lint', 'report', 'import', 'export', 'files', 'embed', 'serve', 'call', 'config', 'doctor', 'migrate', 'eval', 'sync', 'extract', 'features', 'autopilot', 'graph-query', 'jobs', 'apply-migrations', 'skillpack-check']);
+const CLI_ONLY = new Set(['init', 'upgrade', 'post-upgrade', 'check-update', 'integrations', 'publish', 'check-backlinks', 'lint', 'report', 'import', 'export', 'files', 'embed', 'relink', 'serve', 'call', 'config', 'doctor', 'migrate', 'eval', 'sync', 'extract', 'features', 'autopilot', 'graph-query', 'jobs', 'apply-migrations', 'skillpack-check']);
 
 async function main() {
   const args = process.argv.slice(2);
@@ -356,6 +356,11 @@ async function handleCliOnly(command: string, args: string[]) {
         await runEmbed(engine, args);
         break;
       }
+      case 'relink': {
+        const { runRelink } = await import('./commands/relink.ts');
+        await runRelink(engine, args);
+        break;
+      }
       case 'serve': {
         const { runServe } = await import('./commands/serve.ts');
         await runServe(engine);
@@ -519,6 +524,7 @@ TOOLS
         [--dry-run] [--json]
   publish <page.md> [--password]     Shareable HTML (strips private data, optional AES-256)
   check-backlinks <check|fix> [dir]  Find/fix missing back-links across brain
+  relink [--dir <brain-dir>]         Rebuild DB link graph from markdown links
   lint <dir|file> [--fix]            Catch LLM artifacts, placeholder dates, bad frontmatter
   report --type <name> --content ... Save timestamped report to brain/reports/
 
