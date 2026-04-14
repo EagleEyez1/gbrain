@@ -10,3 +10,5 @@ bin/
 .gstack/
 supabase/.temp/
 .claude/skills/
+admin/dist/
+admin/node_modules/

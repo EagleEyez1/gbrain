@@ -270,6 +270,20 @@ export async function runServeHttp(engine: BrainEngine, options: ServeHttpOption
     }
   });
 
+  // Register client from admin dashboard
+  app.post('/admin/api/register-client', requireAdmin, express.json(), async (req, res) => {
+    try {
+      const { name, scopes } = req.body;
+      if (!name) { res.status(400).json({ error: 'Name required' }); return; }
+      const result = await oauthProvider.registerClientManual(
+        name, ['client_credentials'], scopes || 'read', [],
+      );
+      res.json(result);
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : 'Registration failed' });
+    }
+  });
+
   // ---------------------------------------------------------------------------
   // SSE live activity feed
   // ---------------------------------------------------------------------------
@@ -282,6 +296,25 @@ export async function runServeHttp(engine: BrainEngine, options: ServeHttpOption
     sseClients.add(res);
     req.on('close', () => sseClients.delete(res));
   });
+
+  // ---------------------------------------------------------------------------
+  // Admin SPA static files
+  // ---------------------------------------------------------------------------
+  // Serve from admin/dist if it exists (development), otherwise embedded assets
+  const path = await import('path');
+  const fs = await import('fs');
+  const adminDistPath = path.join(process.cwd(), 'admin', 'dist');
+  if (fs.existsSync(adminDistPath)) {
+    app.use('/admin', express.static(adminDistPath));
+    // SPA fallback: serve index.html for all unmatched /admin/* routes
+    app.get('/admin/*', (req, res, next) => {
+      // Skip API and events routes
+      if (req.path.startsWith('/admin/api/') || req.path === '/admin/events' || req.path === '/admin/login') {
+        return next();
+      }
+      res.sendFile(path.join(adminDistPath, 'index.html'));
+    });
+  }
 
   // ---------------------------------------------------------------------------
   // MCP tool calls (bearer auth + scope enforcement)
