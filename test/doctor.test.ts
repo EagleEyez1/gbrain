@@ -40,4 +40,19 @@ describe('doctor command', () => {
     // We can't call it directly (it calls process.exit), but we verify the signature
     expect(runDoctor.length).toBe(2); // engine, args
   });
+
+  test('doctor --fast resolves repo skills even outside repo cwd', async () => {
+    const tmpDir = '/tmp';
+    const result = Bun.spawnSync({
+      cmd: ['bun', 'run', '/home/eric/gbrain/src/cli.ts', 'doctor', '--fast', '--json'],
+      cwd: tmpDir,
+      env: {
+        ...process.env,
+        HOME: '/home/eric',
+      },
+    });
+    const stdout = new TextDecoder().decode(result.stdout).trim();
+    expect(stdout).not.toContain('Could not find skills directory');
+    expect(stdout).toContain('resolver_health');
+  });
 });

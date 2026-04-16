@@ -29,22 +29,8 @@ Ingest meetings, articles, media, documents, and conversations into the brain.
 - State sections are rewritten with current best understanding, never appended to.
 - Entity detection fires on every inbound message; notable entities get pages or updates.
 
-## Iron Law: Back-Linking (MANDATORY)
-
-Every mention of a person or company with a brain page MUST create a back-link
-FROM that entity's page TO the page mentioning them. An unlinked mention is a
-broken brain. See `skills/_brain-filing-rules.md` for format.
-
-## Citation Requirements (MANDATORY)
-
-Every fact written to a brain page must carry an inline `[Source: ...]` citation.
-
-- **User's statements:** `[Source: User, {context}, YYYY-MM-DD]`
-- **Meeting data:** `[Source: Meeting "{title}", YYYY-MM-DD]`
-- **Email/message:** `[Source: email from {name} re: {subject}, YYYY-MM-DD]`
-- **Web content:** `[Source: {publication}, {URL}, YYYY-MM-DD]`
-- **Social media:** `[Source: X/@handle, YYYY-MM-DD](URL)` (include link)
-- **Synthesis:** `[Source: compiled from {sources}]`
+> **Quality convention:** Follow `skills/conventions/quality.md` for citation formats,
+> source precedence, and the back-linking iron law.
 
 ## Phases
 

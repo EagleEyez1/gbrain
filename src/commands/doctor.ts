@@ -3,7 +3,8 @@ import * as db from '../core/db.ts';
 import { LATEST_VERSION } from '../core/migrate.ts';
 import { checkResolvable } from '../core/check-resolvable.ts';
 import { loadCompletedMigrations } from '../core/preferences.ts';
-import { join } from 'path';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
 import { existsSync, readFileSync, readdirSync } from 'fs';
 
 export interface Check {
@@ -228,13 +229,23 @@ export async function runDoctor(engine: BrainEngine | null, args: string[]) {
 
 /** Find the GBrain repo root by walking up from cwd looking for skills/RESOLVER.md */
 function findRepoRoot(): string | null {
+  const candidates: string[] = [];
+
   let dir = process.cwd();
   for (let i = 0; i < 10; i++) {
-    if (existsSync(join(dir, 'skills', 'RESOLVER.md'))) return dir;
+    candidates.push(dir);
     const parent = join(dir, '..');
     if (parent === dir) break;
     dir = parent;
   }
+
+  const moduleRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+  candidates.push(moduleRoot);
+
+  for (const candidate of candidates) {
+    if (existsSync(join(candidate, 'skills', 'RESOLVER.md'))) return candidate;
+  }
+
   return null;
 }
 
